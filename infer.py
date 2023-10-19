@@ -51,10 +51,7 @@ def load_hubert():
     )
     hubert_model = models[0]
     hubert_model = hubert_model.to(config.device)
-    if config.is_half:
-        hubert_model = hubert_model.half()
-    else:
-        hubert_model = hubert_model.float()
+    hubert_model = hubert_model.half() if config.is_half else hubert_model.float()
     hubert_model.eval()
 
 load_hubert()
@@ -64,25 +61,25 @@ index_root = "weights/index"
 weights_model = []
 weights_index = []
 for _, _, model_files in os.walk(weight_root):
-    for file in model_files:
-        if file.endswith(".pth"):
-            weights_model.append(file)
+    weights_model.extend(file for file in model_files if file.endswith(".pth"))
 for _, _, index_files in os.walk(index_root):
-    for file in index_files:
-        if file.endswith('.index') and "trained" not in file:
-            weights_index.append(os.path.join(index_root, file))
+    weights_index.extend(
+        os.path.join(index_root, file)
+        for file in index_files
+        if file.endswith('.index') and "trained" not in file
+    )
 
 def check_models():
     weights_model = []
     weights_index = []
     for _, _, model_files in os.walk(weight_root):
-        for file in model_files:
-            if file.endswith(".pth"):
-                weights_model.append(file)
+        weights_model.extend(file for file in model_files if file.endswith(".pth"))
     for _, _, index_files in os.walk(index_root):
-        for file in index_files:
-            if file.endswith('.index') and "trained" not in file:
-                weights_index.append(os.path.join(index_root, file))
+        weights_index.extend(
+            os.path.join(index_root, file)
+            for file in index_files
+            if file.endswith('.index') and "trained" not in file
+        )
     return (
         gr.Dropdown.update(choices=sorted(weights_model), value=weights_model[0]),
         gr.Dropdown.update(choices=sorted(weights_index))
@@ -114,11 +111,10 @@ def vc_single(
 ):  # spk_item, input_audio0, vc_transform0,f0_file,f0method0
     global tgt_sr, net_g, vc, hubert_model, version, cpt
     try:
-        logs = []
-        print(f"Converting...")
-        logs.append(f"Converting...")
+        print("Converting...")
+        logs = ["Converting..."]
         yield "\n".join(logs), None
-        if vc_audio_mode == "Input path" or "Youtube" and input_audio_path != "":
+        if vc_audio_mode == "Input path" or input_audio_path != "":
             audio, sr = librosa.load(input_audio_path, sr=16000, mono=True)
         elif vc_audio_mode == "Upload audio":
             selected_audio = input_upload_audio
@@ -141,7 +137,7 @@ def vc_single(
             input_audio_path = "tts.mp3"
         f0_up_key = int(f0_up_key)
         times = [0, 0, 0]
-        if hubert_model == None:
+        if hubert_model is None:
             load_hubert()
         if_f0 = cpt.get("f0", 1)
         audio_opt = vc.pipeline(
@@ -168,7 +164,7 @@ def vc_single(
         if resample_sr >= 16000 and tgt_sr != resample_sr:
             tgt_sr = resample_sr
         index_info = (
-            "Using index:%s." % file_index
+            f"Using index:{file_index}."
             if os.path.exists(file_index)
             else "Index not used."
         )
@@ -189,7 +185,7 @@ def vc_single(
 
 def get_vc(sid, to_return_protect0):
     global n_spk, tgt_sr, net_g, vc, cpt, version, weights_index
-    if sid == "" or sid == []:
+    if sid in ["", []]:
         global hubert_model
         if hubert_model is not None:  # 考虑到轮询, 需要加个判断看是否 sid 是由有模型切换到无模型的
             print("clean_empty_cache")
@@ -201,19 +197,21 @@ def get_vc(sid, to_return_protect0):
             if_f0 = cpt.get("f0", 1)
             version = cpt.get("version", "v1")
             if version == "v1":
-                if if_f0 == 1:
-                    net_g = SynthesizerTrnMs256NSFsid(
+                net_g = (
+                    SynthesizerTrnMs256NSFsid(
                         *cpt["config"], is_half=config.is_half
                     )
-                else:
-                    net_g = SynthesizerTrnMs256NSFsid_nono(*cpt["config"])
+                    if if_f0 == 1
+                    else SynthesizerTrnMs256NSFsid_nono(*cpt["config"])
+                )
             elif version == "v2":
-                if if_f0 == 1:
-                    net_g = SynthesizerTrnMs768NSFsid(
+                net_g = (
+                    SynthesizerTrnMs768NSFsid(
                         *cpt["config"], is_half=config.is_half
                     )
-                else:
-                    net_g = SynthesizerTrnMs768NSFsid_nono(*cpt["config"])
+                    if if_f0 == 1
+                    else SynthesizerTrnMs768NSFsid_nono(*cpt["config"])
+                )
             del net_g, cpt
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -256,10 +254,7 @@ def get_vc(sid, to_return_protect0):
     del net_g.enc_q
     print(net_g.load_state_dict(cpt["weight"], strict=False))
     net_g.eval().to(config.device)
-    if config.is_half:
-        net_g = net_g.half()
-    else:
-        net_g = net_g.float()
+    net_g = net_g.half() if config.is_half else net_g.float()
     vc = VC(tgt_sr, config)
     n_spk = cpt["config"][-3]
     selected_index = gr.Dropdown.update(value=weights_index[0])
@@ -280,9 +275,11 @@ def get_vc(sid, to_return_protect0):
 def find_audio_files(folder_path, extensions):
     audio_files = []
     for root, dirs, files in os.walk(folder_path):
-        for file in files:
-            if any(file.endswith(ext) for ext in extensions):
-                audio_files.append(file)
+        audio_files.extend(
+            file
+            for file in files
+            if any(file.endswith(ext) for ext in extensions)
+        )
     return audio_files
 
 def vc_multi(
@@ -299,8 +296,7 @@ def vc_multi(
     protect,
 ):
     global tgt_sr, net_g, vc, hubert_model, version, cpt
-    logs = []
-    logs.append("Converting...")
+    logs = ["Converting..."]
     yield "\n".join(logs)
     print()
     try:
@@ -313,7 +309,7 @@ def vc_multi(
                 input_audio_path = folder_path, file
                 f0_up_key = int(vc_transform0)
                 times = [0, 0, 0]
-                if hubert_model == None:
+                if hubert_model is None:
                     load_hubert()
                 if_f0 = cpt.get("f0", 1)
                 audio_opt = vc.pipeline(
@@ -384,8 +380,7 @@ def download_audio(url, audio_provider):
         yield audio_path, "\n".join(logs)
 
 def cut_vocal_and_inst_yt(split_model):
-    logs = []
-    logs.append("Starting the audio splitting process...")
+    logs = ["Starting the audio splitting process..."]
     yield "\n".join(logs), None, None, None
     command = f"demucs --two-stems=vocals -n {split_model} result/dl_audio/audio.wav -o output"
     result = subprocess.Popen(command.split(), stdout=subprocess.PIPE, text=True)
@@ -399,11 +394,10 @@ def cut_vocal_and_inst_yt(split_model):
     yield "\n".join(logs), vocal, inst, vocal
 
 def cut_vocal_and_inst(split_model, audio_data):
-    logs = []
     vocal_path = "output/result/audio.wav"
     os.makedirs("output/result", exist_ok=True)
     wavfile.write(vocal_path, audio_data[0], audio_data[1])
-    logs.append("Starting the audio splitting process...")
+    logs = ["Starting the audio splitting process..."]
     yield "\n".join(logs), None, None
     command = f"demucs --two-stems=vocals -n {split_model} {vocal_path} -o output"
     result = subprocess.Popen(command.split(), stdout=subprocess.PIPE, text=True)
@@ -437,10 +431,9 @@ def download_and_extract_models(urls):
         url = link.strip()
         if not url:
             raise gr.Error("URL Required!")
-            return "No URLs provided."
         model_zip = urlparse(url).path.split('/')[-2] + '.zip'
         model_zip_path = os.path.join('zips', model_zip)
-        logs.append(f"Downloading...")
+        logs.append("Downloading...")
         yield "\n".join(logs)
         if "drive.google.com" in url:
             gdown.download(url, os.path.join("zips", "extract"), quiet=False)
@@ -449,7 +442,7 @@ def download_and_extract_models(urls):
             m.download_url(url, 'zips')
         else:
             os.system(f"wget {url} -O {model_zip_path}")
-        logs.append(f"Extracting...")
+        logs.append("Extracting...")
         yield "\n".join(logs)
         for filename in os.listdir("zips"):
             archived_file = os.path.join("zips", filename)
@@ -459,7 +452,7 @@ def download_and_extract_models(urls):
                 with rarfile.RarFile(archived_file, 'r') as rar:
                     rar.extractall(os.path.join("zips", "extract"))
         for _, dirs, files in os.walk(os.path.join("zips", "extract")):
-            logs.append(f"Searching Model and Index...")
+            logs.append("Searching Model and Index...")
             yield "\n".join(logs)
             model = False
             index = False
